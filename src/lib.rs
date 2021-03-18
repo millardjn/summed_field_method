@@ -4,18 +4,16 @@ use crate::fft2::{
     depad_2D, fft_shift_inplace, fft2_shift_inplace, fft2, ifft2,
     ifft2_shift_inplace, ifft_shift_inplace, pad_2D_to, pad_zero_2D, fft2c, ifft2c,
 };
-
 use find_fast_number::fastish_fft_len;
-use ndarray::{aview_mut1, s,  Array2, ArrayView2, Axis,  Zip};
+use ndarray::{Array2, Array3, ArrayView2, Axis, Zip, aview_mut1, s};
 use ndarray::parallel::prelude::{IntoParallelIterator, ParallelIterator};
 use num_complex::Complex;
 use num_integer::gcd;
 use rustfft::num_traits::Zero;
 use rustfft::{FftPlanner, FftDirection};
+use unchecked_index::{unchecked_index, get_unchecked, get_unchecked_mut};
 use std::cmp::{max, min};
-
 use std::f64::consts::PI;
-
 mod fft2;
 mod find_fast_number;
 pub mod mask;
@@ -173,48 +171,49 @@ fn sum_to_tile(
 fn input_tile_high_memory(
     mut A_xi: Field,
     fl: f64,
-    lambda: f64,
+    wavelengths: &[f64],
     tile_shape: [usize; 2],
     resample_shape: [usize; 2],
-) -> Field {
+) -> Vec<Field> {
     let f_step = freq_res(A_xi.values.shape(), A_xi.pitch);
     ifft2_shift_inplace(A_xi.values.view_mut());
     let mut a_u = fft2(A_xi.values);
     fft2_shift_inplace(a_u.view_mut());
     let sp_step = spatial_res(&resample_shape, f_step);
 
+    wavelengths.iter().map(|lambda|{
+        let a_u_star = pad_2D_to(a_u.view(), resample_shape);
 
-    let a_u_star = pad_2D_to(a_u.view(), resample_shape);
-
-    let mut A_xi_star = ifft2c(a_u_star);
-
-    // Apply perfect lens phase
-    // A(ξ) * exp(-2πi(sqrt(f^2+ξ^2)-f)/λ)
-    centered_par_iter(&mut A_xi_star, sp_step, |(y, x), e| {
-            //let theta = -2.0 * PI / lambda * ((y * y + x * x + fl * fl).sqrt() - fl); // numerically unstable - cancellation
-            let theta = -2.0 * PI / lambda * ((y * y + x * x)/((y * y + x * x + fl * fl).sqrt() + fl)); // stable
-            *e = *e * Complex::new(0.0,theta).exp()
-    });
-
-    // sum to tile
-    // sp_step stays the same
-    let A_xi_tile = sum_to_tile(A_xi_star.view(), tile_shape);
-    Field {
-        values: A_xi_tile,
-        pitch: sp_step,
-    }
+        let mut A_xi_star = ifft2c(a_u_star);
+    
+        // Apply perfect lens phase
+        // A(ξ) * exp(-2πi(sqrt(f^2+ξ^2)-f)/λ)
+        centered_par_iter(&mut A_xi_star, sp_step, |(y, x), e| {
+                //let theta = -2.0 * PI / lambda * ((y * y + x * x + fl * fl).sqrt() - fl); // numerically unstable - cancellation
+                let theta = -2.0 * PI / lambda * ((y * y + x * x)/((y * y + x * x + fl * fl).sqrt() + fl)); // stable
+                *e = *e * Complex::new(0.0,theta).exp()
+        });
+    
+        // sum to tile
+        // sp_step stays the same
+        let A_xi_tile = sum_to_tile(A_xi_star.view(), tile_shape);
+        Field {
+            values: A_xi_tile,
+            pitch: sp_step,
+        }
+    }).collect()
 }
 
 
 fn input_tile_low_memory(
     mut A_xi: Field,
     fl: f64,
-    lambda: f64,
+    wavelengths: &[f64],
     tile_shape: [usize; 2],
     resample_shape: [usize; 2],
     extra_low_memory: bool,
-) -> Field {
-
+) -> Vec<Field> {
+    
     // let debug = if cfg!(debug_assertions) {
     //     Some(input_tile_high_memory(A_xi.clone(), fl, lambda, tile_shape, resample_shape))
     // } else {None};
@@ -222,6 +221,9 @@ fn input_tile_low_memory(
 
     // assert_eq!(resample_shape[0] % 2, tile_shape[0] % 2); todo are these necessary? it doesnt seems so
     // assert_eq!(resample_shape[1] % 2, tile_shape[1] % 2);
+
+    assert!(resample_shape[0] > A_xi.values.shape()[0]);
+    assert!(resample_shape[1] > A_xi.values.shape()[1]);
 
     let offset0 = resample_shape[0] / 2 - tile_shape[0] / 2;
     let offset1 = resample_shape[1] / 2 - tile_shape[1] / 2;
@@ -240,7 +242,7 @@ fn input_tile_low_memory(
     let sp_step = spatial_res(&resample_shape, f_step);
 
 
-    let mut tile_sum: Array2<Complex<f64>> = Array2::zeros(tile_shape);
+    let mut tile_sums: Array3<Complex<f64>> = Array3::zeros([wavelengths.len(), tile_shape[0], tile_shape[1]]);
     let mut start0 = 0;
     while start0 < resample_shape[0] {
         let end0 = if extra_low_memory {
@@ -255,23 +257,26 @@ fn input_tile_low_memory(
         // fill temp with axis0 ifft
         Zip::from(axis0_ifft_panel.axis_iter_mut(Axis(1)))
             .and(a_u.axis_iter(Axis(1)))
-            .into_par_iter().for_each_init(|| (vec![Zero::zero(); fft0.len()], vec![Zero::zero(); fft0.get_inplace_scratch_len()]), |(fft_input, scratch), (mut axis0_ifft_panel, a_u0)| {
-                let pad = resample_shape[0] - a_u0.len();
+            .into_par_iter().for_each_init(|| (vec![Zero::zero(); fft0.len()], vec![Zero::zero(); fft0.get_inplace_scratch_len()]), |(fft_input, scratch), (mut axis0_ifft_panel, a_u0)| {               
+                let pad = resample_shape[0].checked_sub(a_u0.len()).unwrap();
                 let half = (a_u0.len() + 1) / 2;
 
                 // input is already ifft_shift'd just need padding in center to bring to resample size
                 unsafe {
                     let mut k = 0;
                     for &e in a_u0.slice(s![..half]) {
-                        *fft_input.get_unchecked_mut(k) = e;
+                        *get_unchecked_mut(fft_input.as_mut_slice(), k) = e;
+                        //*fft_input.get_unchecked_mut(k) = e;
                         k += 1;
                     }
                     for _ in 0..pad {
-                        *fft_input.get_unchecked_mut(k) = Zero::zero();
+                        *get_unchecked_mut(fft_input.as_mut_slice(), k) = Zero::zero();
+                        //*fft_input.get_unchecked_mut(k) = Zero::zero();
                         k += 1;
                     }
                     for &e in a_u0.slice(s![half..]) {
-                        *fft_input.get_unchecked_mut(k) = e;
+                        *get_unchecked_mut(fft_input.as_mut_slice(), k) = e;
+                        //*fft_input.get_unchecked_mut(k) = e;
                         k += 1;
                     }
                 }
@@ -323,38 +328,40 @@ fn input_tile_low_memory(
 
         let mut temp0_slice_start = 0;
         while temp0_slice_start < axis0_ifft_panel.shape()[0] {
-            let tile0_slice_start = (border_tiles0 * tile_shape[0] + temp0_slice_start + start0
-                - offset0)
+            let tile0_slice_start = ((border_tiles0 * tile_shape[0] + temp0_slice_start + start0).checked_sub(offset0).unwrap())
                 % tile_shape[0];
             let temp0_slice_end = min(
                 axis0_ifft_panel.shape()[0],
-                temp0_slice_start + tile_shape[0] - tile0_slice_start,
+                (temp0_slice_start + tile_shape[0]).checked_sub(tile0_slice_start).unwrap(),
             ); // end slice at either end of temp or end of
-            let tile0_slice_end = tile0_slice_start + temp0_slice_end - temp0_slice_start;
+            let tile0_slice_end = (tile0_slice_start + temp0_slice_end).checked_sub(temp0_slice_start).unwrap();
 
             let temp_slice = axis0_ifft_panel.slice(s![temp0_slice_start..temp0_slice_end, ..]);
-            let mut tile_slice = tile_sum.slice_mut(s![tile0_slice_start..tile0_slice_end, ..]);
+            let mut tile_slices = tile_sums.slice_mut(s![.., tile0_slice_start..tile0_slice_end, ..]);
 
-            Zip::indexed(tile_slice.axis_iter_mut(Axis(0)))
+            Zip::indexed(tile_slices.axis_iter_mut(Axis(1)))
                 .and(temp_slice.axis_iter(Axis(0)))
-                .into_par_iter().for_each_init(|| (vec![Zero::zero(); fft1.len()], vec![Zero::zero(); fft1.get_inplace_scratch_len()]), |(fft_input, scratch), (i, mut tile, temp)| {
-                    let i = i + start0 + temp0_slice_start;
-                    let pad = resample_shape[1] - temp.len();
+                .into_par_iter().for_each_init(|| (vec![Zero::zero(); fft1.len()], vec![Zero::zero(); fft1.get_inplace_scratch_len()]), |(fft_input, scratch), (i, mut tiles, temp)| {
+                    
+                    let pad = (resample_shape[1]).checked_sub(temp.len()).unwrap();
                     let half = (temp.len() + 1) / 2;
                     
                     // input is already fft_shift'd just need padding in center to bring to resample size
                     unsafe {
                         let mut k = 0;
                         for &e in temp.slice(s![..half]) {
-                            *fft_input.get_unchecked_mut(k) = e;
+                            *get_unchecked_mut(fft_input.as_mut_slice(), k) = e;
+                            //*fft_input.get_unchecked_mut(k) = e;
                             k += 1;
                         }
                         for _ in 0..pad {
-                            *fft_input.get_unchecked_mut(k) = Zero::zero();
+                            *get_unchecked_mut(fft_input.as_mut_slice(), k) = Zero::zero();
+                            //*fft_input.get_unchecked_mut(k) = Zero::zero();
                             k += 1;
                         }
                         for &e in temp.slice(s![half..]) {
-                            *fft_input.get_unchecked_mut(k) = e;
+                            *get_unchecked_mut(fft_input.as_mut_slice(), k) = e;
+                            //*fft_input.get_unchecked_mut(k) = e;
                             k += 1;
                         }
                     }
@@ -364,30 +371,45 @@ fn input_tile_low_memory(
                     fft1.process_with_scratch(fft_input, scratch);
                     let fft_out = fft_input;
 
-                    let tile_slice = tile.as_slice_mut().unwrap();
+                    
 
 
                     // write from ifft to tile - linear chunks (fast)
                     let half = (fft_out.len() + 1) / 2;
                     let mut j_start = 0;
+                    let i = i + start0 + temp0_slice_start;
                     let y = (i as f64 - (resample_shape[0] / 2) as f64) * sp_step.0;
                     while j_start < resample_shape[1] {
                         let fft_j_start = (j_start + half) % fft_out.len(); //fftshift
                         let out_j_start = (border_tiles1 * tile_shape[1] + j_start - offset1) % tile_shape[1];
 
                         let len = min(if fft_j_start < half {half - fft_j_start} else {fft_out.len() - fft_j_start}, tile_shape[1] - out_j_start);
-                        debug_assert!(out_j_start+len <= tile_slice.len());
-                        debug_assert!(fft_j_start+len <= fft_out.len());
-                        for n in 0..len {
-                            let x = ((j_start + n) as f64 - (resample_shape[1] / 2) as f64) * sp_step.1;
 
-                            //let theta = -2.0 * PI / lambda * ((y * y + x * x + fl * fl).sqrt() - fl); // numerically unstable - cancellation
-                            let theta = -2.0 * PI / lambda * ((y * y + x * x)/((y * y + x * x + fl * fl).sqrt() + fl)); // stable
-                            let focal_phase = Complex::new(0.0, theta).exp();
-                            unsafe{
-                                *tile_slice.get_unchecked_mut(out_j_start+n) += fft_out.get_unchecked(fft_j_start+n) * focal_phase;
+
+
+                        for (i, mut tile) in tiles.axis_iter_mut(Axis(0)).enumerate() {
+
+                            let lambda = wavelengths[i];
+                            let tile_slice = tile.as_slice_mut().unwrap();
+
+                            debug_assert!(out_j_start+len <= tile_slice.len());
+                            debug_assert!(fft_j_start+len <= fft_out.len());
+
+
+                            for n in 0..len {
+                                let x = ((j_start + n) as f64 - (resample_shape[1] / 2) as f64) * sp_step.1;
+    
+                                //let theta = -2.0 * PI / lambda * ((y * y + x * x + fl * fl).sqrt() - fl); // numerically unstable - cancellation
+                                let theta = -2.0 * PI / lambda * ((y * y + x * x)/((y * y + x * x + fl * fl).sqrt() + fl)); // stable
+                                let focal_phase = Complex::new(0.0, theta).exp();
+                                unsafe{
+                                    *get_unchecked_mut(tile_slice, out_j_start+n) += fft_out.get_unchecked(fft_j_start+n) * focal_phase;
+                                    //*tile_slice.get_unchecked_mut(out_j_start+n) += fft_out.get_unchecked(fft_j_start+n) * focal_phase;
+                                }
                             }
                         }
+
+
 
                         j_start += len;
                     }
@@ -420,11 +442,13 @@ fn input_tile_low_memory(
     // }
 
     let fft_normalisation = 1.0 / (resample_shape[0] as f64 * resample_shape[1] as f64).sqrt();
-    tile_sum.map_inplace(|e| *e *= fft_normalisation);
-    Field {
-        values: tile_sum,
-        pitch: sp_step,
-    }
+    tile_sums.axis_iter_mut(Axis(0)).map(|mut tile_sum|{
+        tile_sum.par_map_inplace(|e| *e *= fft_normalisation);
+        Field {
+            values: tile_sum.to_owned(),
+            pitch: sp_step,
+        }
+    }).collect()
 }
 
 pub (crate) fn div_up(num: usize, denom: usize) -> usize {
@@ -463,28 +487,33 @@ pub fn hillenbrand_asm_part_1(
     A_xi: Field,
     //z: f64,
     fl: f64,
-    lambda: f64,
+    wavelengths: &[f64],
     tile_shape: [usize; 2],
     resample_shape: [usize; 2],
     extra_low_memory: bool,
-) -> Spectrum {
+) -> Vec<Spectrum> {
     let area_scaling = ((resample_shape[0] as f64 / A_xi.values.shape()[0] as f64)
         * (resample_shape[1] as f64 / A_xi.values.shape()[1] as f64))
         .sqrt();
 
-    let mut A_xi_tile = input_tile_low_memory(A_xi, fl, lambda, tile_shape, resample_shape, extra_low_memory);
+        
 
-    Zip::from(&mut A_xi_tile.values)
-    .par_apply(|e| *e *= area_scaling);
+    let A_xi_tiles = input_tile_low_memory(A_xi, fl, wavelengths, tile_shape, resample_shape, extra_low_memory);
 
-    // a(u)
-    let f_res = freq_res(A_xi_tile.values.shape(), A_xi_tile.pitch);
-    let a_u_tile = fft2c(A_xi_tile.values);
+    A_xi_tiles.into_iter().map(|mut A_xi_tile|{
+        Zip::from(&mut A_xi_tile.values)
+        .par_apply(|e| *e *= area_scaling);
+    
+        // a(u)
+        let f_res = freq_res(A_xi_tile.values.shape(), A_xi_tile.pitch);
+        let a_u_tile = fft2c(A_xi_tile.values);
+    
+        Spectrum {
+            values: a_u_tile,
+            freq_res: f_res,
+        }
+    }).collect()
 
-    Spectrum {
-        values: a_u_tile,
-        freq_res: f_res,
-    }
 }
 
 /// From the input Spectrum, calculate the Spectrum at distance z
@@ -1057,7 +1086,7 @@ mod test {
     use image::{RgbImage, Rgb};
     use num_complex::Complex;
     use crate::mask::generate_mask;
-    use crate::{hillenbrand_asm_part_1, hillenbrand_asm_part_2, resample_shape_min, find_fast};
+    use crate::{hillenbrand_asm_part_1, hillenbrand_asm_part_2, hillenbrand_asm_part_3, resample_shape_min, find_fast};
 
     #[test]
     pub fn test_aperture() {
@@ -1094,8 +1123,8 @@ mod test {
         let tile_shape = [(mask_shape as f64 * oversample).ceil() as usize, (mask_shape as f64 * oversample).ceil() as usize];
 
 
-        let input_spectrum = hillenbrand_asm_part_1(input_field, fl, lambda, tile_shape, resample_shape, false);
-        let output_spectrum = hillenbrand_asm_part_2(input_spectrum, z, lambda);
+        let mut input_spectrum = hillenbrand_asm_part_1(input_field, fl, &[lambda, lambda*1.1], tile_shape, resample_shape, false);
+        let output_spectrum = hillenbrand_asm_part_2(input_spectrum.swap_remove(0), z, lambda);
         save_complex_image("test_spectrum.png", output_spectrum.values.view()).unwrap();
 
         let super_sample = 1;

@@ -11,6 +11,7 @@ num-complex = "0.3"
 ndarray =  { version = "0.14", features = ["rayon"]}
 rustfft = "5"
 num-integer = "0.1"
+unchecked-index = "0.2"
 
 [dev-dependencies]
 palette = "0.5.0"
