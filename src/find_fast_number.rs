@@ -1,6 +1,11 @@
 use std::cmp::min;
 
-fn fast_fft_len(lower_limit: usize, single_factor: usize, multi_factor1: usize, multi_factor2: usize) -> usize {
+fn fast_fft_len(
+    lower_limit: usize,
+    single_factor: usize,
+    multi_factor1: usize,
+    multi_factor2: usize,
+) -> usize {
     let mut product = single_factor;
     while product < lower_limit {
         product *= multi_factor2
@@ -9,13 +14,13 @@ fn fast_fft_len(lower_limit: usize, single_factor: usize, multi_factor1: usize, 
     loop {
         if product > lower_limit {
             if product % multi_factor2 != 0 {
-                return min
+                return min;
             }
             product /= multi_factor2;
         } else if product < lower_limit {
             product *= multi_factor1;
         } else {
-            return product
+            return product;
         }
         if product > lower_limit && product < min {
             min = product;
@@ -28,7 +33,7 @@ fn fast_fft_len(lower_limit: usize, single_factor: usize, multi_factor1: usize, 
 /// While factors of 2 and 3 are optimal, factors below 12 are still reasonably fast.
 pub fn fastish_fft_len(lower_limit: usize) -> usize {
     let mut x = lower_limit.next_power_of_two();
-    for &alt in &[1, 5, 7, 11]{
+    for &alt in &[1, 5, 7, 11] {
         x = min(x, fast_fft_len(lower_limit, alt, 2, 3));
     }
     x
@@ -56,7 +61,7 @@ fn factors23x() {
     let mut log = LineWriter::new(file);
     for i in 1..=1_000_000usize {
         let mut x = i.next_power_of_two();
-        for &alt in &[1, 5, 7, 11]{
+        for &alt in &[1, 5, 7, 11] {
             x = min(x, fast_fft_len(i, alt, 2, 3));
         }
         writeln!(log, "{} {}", i, x).unwrap();
@@ -72,7 +77,11 @@ fn factors23xx() {
     let mut log = LineWriter::new(file);
     for i in 1..=1_000_000usize {
         let mut x = i.next_power_of_two();
-        for alt in [1, 5, 7, 11].iter().flat_map(|&e1| [1, 5, 7, 11].iter().filter_map(move |&e2| if e2 >= e1 {Some(e1*e2)} else {None})) {
+        for alt in [1, 5, 7, 11].iter().flat_map(|&e1| {
+            [1, 5, 7, 11]
+                .iter()
+                .filter_map(move |&e2| if e2 >= e1 { Some(e1 * e2) } else { None })
+        }) {
             x = min(x, fast_fft_len(i, alt, 2, 3));
         }
         writeln!(log, "{} {}", i, x).unwrap();

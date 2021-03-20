@@ -1,8 +1,8 @@
+use ndarray::parallel::prelude::{IntoParallelIterator, ParallelIterator};
 use ndarray::{s, Array2, ArrayView2, ArrayViewMut1, ArrayViewMut2, Axis, Zip};
 use rustfft::num_complex::Complex;
 use rustfft::num_traits::Zero;
-use rustfft::{FftPlanner, FftDirection};
-use ndarray::parallel::prelude::{IntoParallelIterator, ParallelIterator};
+use rustfft::{FftDirection, FftPlanner};
 
 pub fn fft2(mut input: Array2<Complex<f64>>) -> Array2<Complex<f64>> {
     _fft2(input.view_mut(), FftDirection::Forward);
@@ -12,34 +12,43 @@ pub fn ifft2(mut input: Array2<Complex<f64>>) -> Array2<Complex<f64>> {
     _fft2(input.view_mut(), FftDirection::Inverse);
     input
 }
-pub fn _fft2(
-    mut input: ArrayViewMut2<Complex<f64>>,
-    direction: FftDirection,
-) {
+pub fn _fft2(mut input: ArrayViewMut2<Complex<f64>>, direction: FftDirection) {
     let mut planner = FftPlanner::new();
     let fft_row = planner.plan_fft(input.shape()[1], direction);
     let fft_col = planner.plan_fft(input.shape()[0], direction);
     let normalisation = 1.0 / ((input.shape()[0] * input.shape()[1]) as f64).sqrt();
 
-    Zip::from(input.genrows_mut()).into_par_iter().for_each_init(|| vec![Zero::zero(); fft_row.get_inplace_scratch_len()], |scratch, mut row| {
-        fft_row.process_with_scratch(
-            &mut row.0.as_slice_mut().unwrap(),
-            scratch
+    Zip::from(input.genrows_mut())
+        .into_par_iter()
+        .for_each_init(
+            || vec![Zero::zero(); fft_row.get_inplace_scratch_len()],
+            |scratch, mut row| {
+                fft_row.process_with_scratch(&mut row.0.as_slice_mut().unwrap(), scratch);
+            },
         );
-    });
 
-    Zip::from(input.gencolumns_mut()).into_par_iter().for_each_init(|| (vec![Zero::zero(); fft_col.len()], vec![Zero::zero(); fft_col.get_inplace_scratch_len()]), |(temp, scratch), mut col| {
-        debug_assert_eq!(col.0.len(), temp.len());
-        unsafe{
-            for (i, col) in col.0.iter_mut().enumerate() {
-                *temp.get_unchecked_mut(i) = *col;
-            }
-            fft_col.process_with_scratch(temp, scratch);
-            for (i, col) in col.0.iter_mut().enumerate() {
-                *col = *temp.get_unchecked(i) * normalisation;
-            }
-        }
-    });
+    Zip::from(input.gencolumns_mut())
+        .into_par_iter()
+        .for_each_init(
+            || {
+                (
+                    vec![Zero::zero(); fft_col.len()],
+                    vec![Zero::zero(); fft_col.get_inplace_scratch_len()],
+                )
+            },
+            |(temp, scratch), mut col| {
+                debug_assert_eq!(col.0.len(), temp.len());
+                unsafe {
+                    for (i, col) in col.0.iter_mut().enumerate() {
+                        *temp.get_unchecked_mut(i) = *col;
+                    }
+                    fft_col.process_with_scratch(temp, scratch);
+                    for (i, col) in col.0.iter_mut().enumerate() {
+                        *col = *temp.get_unchecked(i) * normalisation;
+                    }
+                }
+            },
+        );
 }
 
 pub fn fft2c(mut input: Array2<Complex<f64>>) -> Array2<Complex<f64>> {
@@ -52,61 +61,74 @@ pub fn ifft2c(mut input: Array2<Complex<f64>>) -> Array2<Complex<f64>> {
 }
 /// performs a 2D fft where the 0th component is at the center rather than the normal right
 /// removes the neext for ifft_shift befor and fft_shift after.
-pub fn _fft2c(mut input: ArrayViewMut2<Complex<f64>>, direction: FftDirection,){
-        let i0 = input.shape()[0];
-        let i1 = input.shape()[1];
+pub fn _fft2c(mut input: ArrayViewMut2<Complex<f64>>, direction: FftDirection) {
+    let i0 = input.shape()[0];
+    let i1 = input.shape()[1];
 
-        let normalisation = 1.0 / ((input.shape()[0] * input.shape()[1]) as f64).sqrt();
+    let normalisation = 1.0 / ((input.shape()[0] * input.shape()[1]) as f64).sqrt();
 
-        let mut planner = FftPlanner::new();
-        let fft0 = planner.plan_fft(i0, direction);
-        let fft1 = planner.plan_fft(i1, direction);
-        // fft along axis1, iteration over axis0
-        Zip::from(input.axis_iter_mut(Axis(0)))
-        .into_par_iter().for_each_init(|| vec![Zero::zero(); fft1.get_inplace_scratch_len()], |scratch, input_row| {
-            let mut input_row = input_row.0;
-            ifft_shift_inplace(input_row.view_mut());
-            fft1.process_with_scratch(input_row.as_slice_mut().unwrap(), scratch);
-            fft_shift_inplace(input_row);
-        });
+    let mut planner = FftPlanner::new();
+    let fft0 = planner.plan_fft(i0, direction);
+    let fft1 = planner.plan_fft(i1, direction);
+    // fft along axis1, iteration over axis0
+    Zip::from(input.axis_iter_mut(Axis(0)))
+        .into_par_iter()
+        .for_each_init(
+            || vec![Zero::zero(); fft1.get_inplace_scratch_len()],
+            |scratch, input_row| {
+                let mut input_row = input_row.0;
+                ifft_shift_inplace(input_row.view_mut());
+                fft1.process_with_scratch(input_row.as_slice_mut().unwrap(), scratch);
+                fft_shift_inplace(input_row);
+            },
+        );
 
-        // fft along axis0, iteration over axis1
-        Zip::from(input.axis_iter_mut(Axis(1)))
-        .into_par_iter().for_each_init(|| (vec![Zero::zero(); fft0.len()], vec![Zero::zero(); fft0.get_inplace_scratch_len()]), |(fft_buffer, scratch), input_col| {
-            let mut input_col = input_col.0;
-            let fft_buffer = fft_buffer.as_mut_slice();
-            let half = i0/2;
-    
-            // construct input equivalent to ifft_shift followed by padding to resample size
-            // the halves of the input are reverse compared to the hillenbrand tiling because the input has not yet been fft_shifted
-            // this is also why half rounds down, as in an ifft
-            unsafe {
-                let mut k = 0;
-                for &e in input_col.slice(s![half..]) {
-                    *fft_buffer.get_unchecked_mut(k) = e;
-                    k += 1;
+    // fft along axis0, iteration over axis1
+    Zip::from(input.axis_iter_mut(Axis(1)))
+        .into_par_iter()
+        .for_each_init(
+            || {
+                (
+                    vec![Zero::zero(); fft0.len()],
+                    vec![Zero::zero(); fft0.get_inplace_scratch_len()],
+                )
+            },
+            |(fft_buffer, scratch), input_col| {
+                let mut input_col = input_col.0;
+                let fft_buffer = fft_buffer.as_mut_slice();
+                let half = i0 / 2;
+
+                // construct input equivalent to ifft_shift followed by padding to resample size
+                // the halves of the input are reverse compared to the hillenbrand tiling because the input has not yet been fft_shifted
+                // this is also why half rounds down, as in an ifft
+                unsafe {
+                    let mut k = 0;
+                    for &e in input_col.slice(s![half..]) {
+                        *fft_buffer.get_unchecked_mut(k) = e;
+                        k += 1;
+                    }
+                    for &e in input_col.slice(s![..half]) {
+                        *fft_buffer.get_unchecked_mut(k) = e;
+                        k += 1;
+                    }
                 }
-                for &e in input_col.slice(s![..half]) {
-                    *fft_buffer.get_unchecked_mut(k) = e;
-                    k += 1;
+
+                fft0.process_with_scratch(fft_buffer, scratch);
+
+                // fft_shift and depad then multiply by write back
+                unsafe {
+                    let mut k = 0;
+                    for e in input_col.slice_mut(s![half..]) {
+                        *e = *fft_buffer.get_unchecked_mut(k) * normalisation;
+                        k += 1;
+                    }
+                    for e in input_col.slice_mut(s![..half]) {
+                        *e = *fft_buffer.get_unchecked_mut(k) * normalisation;
+                        k += 1;
+                    }
                 }
-            }
-    
-            fft0.process_with_scratch(fft_buffer, scratch);
-        
-            // fft_shift and depad then multiply by write back
-            unsafe {
-                let mut k = 0;
-                for e in input_col.slice_mut(s![half..]) {
-                    *e = *fft_buffer.get_unchecked_mut(k) * normalisation;
-                    k += 1;
-                }
-                for e in input_col.slice_mut(s![..half]) {
-                    *e = *fft_buffer.get_unchecked_mut(k) * normalisation;
-                    k += 1;
-                }
-            }
-        });
+            },
+        );
 }
 
 /// Moves the origin (0, 0) to the "center" of the array (H/2, W/2)
@@ -286,13 +308,11 @@ mod tests {
     use ndarray::ArrayViewMut;
     use rustfft::num_complex::Complex;
 
-
     fn assert_eq_vecs(a: &[Complex<f64>], b: &[Complex<f64>]) {
         for (a, b) in a.iter().zip(b) {
             assert!((a - b).norm() < 1e-7, "{}", (a - b).norm());
         }
     }
-
 
     #[test]
     fn test_fft_shift_odd() {
