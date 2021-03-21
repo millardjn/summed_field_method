@@ -205,13 +205,6 @@ fn input_tile_low_memory(
     resample_shape: [usize; 2],
     extra_low_memory: bool,
 ) -> Vec<Field> {
-    // let debug = if cfg!(debug_assertions) {
-    //     Some(input_tile_high_memory(A_xi.clone(), fl, lambda, tile_shape, resample_shape))
-    // } else {None};
-
-    // assert_eq!(resample_shape[0] % 2, tile_shape[0] % 2); todo are these necessary? it doesnt seems so
-    // assert_eq!(resample_shape[1] % 2, tile_shape[1] % 2);
-
     assert!(resample_shape[0] > A_xi.values.shape()[0]);
     assert!(resample_shape[1] > A_xi.values.shape()[1]);
 
@@ -291,40 +284,7 @@ fn input_tile_low_memory(
                 },
             );
 
-        // for (i, a_u1) in temp.axis_iter(Axis(0)).enumerate() {
-        //     let i = i + start0;
-
-        //     let pad = resample_shape[1] - a_u1.len();
-        //     let half = (a_u1.len()+1)/2;
-        //     let mut fft_input: Vec<_> = a_u1.slice(s![..half]).iter().chain(repeat(&Zero::zero()).take(pad)).chain(a_u1.slice(s![half..])).cloned().collect();
-
-        //     let mut fft_out = vec![Zero::zero(); resample_shape[1]];
-        //     fft1.process(&mut fft_input, &mut fft_out);
-
-        //     // find tile row
-        //     let out_i = (border_tiles0 * tile_shape[0] + i - offset0) % tile_shape[0];
-        //     let mut out_row = tile_sum.slice_axis_mut(Axis(0), (out_i..=out_i).into());
-        //     let out_row_slice = out_row.as_slice_mut().unwrap();
-
-        //     // write from ifft to tile
-        //     let half = (fft_out.len()+1)/2;
-        //     for j in 0..resample_shape[1] {
-        //         let fft_j = (j+half)%fft_out.len(); //fftshift
-
-        //         let out_j = (border_tiles1 * tile_shape[1] + j - offset1) % tile_shape[1];
-
-        //         let y = (i as f64x - (resample_shape[0]/2) as f64x)*sp_step.0;
-        //         let x = (j as f64x - (resample_shape[1]/2) as f64x)*sp_step.1;
-        //         let focal_phase = Complex::new(
-        //             0.0,
-        //             -2.0 * PI / lambda * ((y * y + x * x + fl * fl).sqrt() - fl),
-        //         )
-        //         .exp();
-        //         out_row_slice[out_j] += fft_out[fft_j]*fft_scaling * focal_phase;
-        //     }
-
-        // }
-
+        // Once temp is filled, perform fft acros axis 1, and sum tile contributions
         let mut temp0_slice_start = 0;
         while temp0_slice_start < axis0_ifft_panel.shape()[0] {
             let tile0_slice_start = ((border_tiles0 * tile_shape[0] + temp0_slice_start + start0)
@@ -412,7 +372,7 @@ fn input_tile_low_memory(
                                     let x = ((j_start + n) as f64 - (resample_shape[1] / 2) as f64)
                                         * sp_step.1;
 
-                                    //let theta = -2.0 * PI / lambda * ((y * y + x * x + fl * fl).sqrt() - fl); // numerically unstable - cancellation
+                                    //let theta = -2.0 * PI / lambda * ((y * y + x * x + fl * fl).sqrt() - fl); // numerically unstable due to cancellation
                                     let theta = -2.0 * PI / lambda
                                         * ((y * y + x * x)
                                             / ((y * y + x * x + fl * fl).sqrt() + fl)); // stable
@@ -420,27 +380,12 @@ fn input_tile_low_memory(
                                     unsafe {
                                         *get_unchecked_mut(tile_slice, out_j_start + n) +=
                                             fft_out.get_unchecked(fft_j_start + n) * focal_phase;
-                                        //*tile_slice.get_unchecked_mut(out_j_start+n) += fft_out.get_unchecked(fft_j_start+n) * focal_phase;
                                     }
                                 }
                             }
 
                             j_start += len;
                         }
-
-                        // // write from ifft to tile - lookup (slow)
-                        // let half = (fft_out.len() + 1) / 2;
-                        // for j in 0..resample_shape[1] {
-                        //     let fft_j = (j + half) % fft_out.len(); //fftshift
-                        //     let out_j = (border_tiles1 * tile_shape[1] + j - offset1) % tile_shape[1];
-
-                        //     let y = (i as f64 - (resample_shape[0] / 2) as f64) * sp_step.0;
-                        //     let x = (j as f64 - (resample_shape[1] / 2) as f64) * sp_step.1;
-                        //     //let theta = -2.0 * PI / lambda * ((y * y + x * x + fl * fl).sqrt() - fl);  // numerically unstable - cancellation
-                        //     let theta = -2.0 * PI / lambda * ((y * y + x * x)/((y * y + x * x + fl * fl).sqrt() + fl)); // stable
-                        //     let focal_phase = Complex::new(0.0, theta).exp();
-                        //     tile_slice[out_j] += fft_out[fft_j] * focal_phase;
-                        // }
                     },
                 );
 
@@ -449,12 +394,6 @@ fn input_tile_low_memory(
 
         start0 = end0;
     }
-
-    // if let Some(A_xi_tile1) = debug {
-    //     let err = (&tile_sum - &A_xi_tile1.values).map(|e| e.norm_sqr()).sum().sqrt()
-    //         / A_xi_tile1.values.map(|e| e.norm_sqr()).sum().sqrt();
-    //     assert!(err < EPSILON * 4.0, "err:{}", err);
-    // }
 
     let fft_normalisation = 1.0 / (resample_shape[0] as f64 * resample_shape[1] as f64).sqrt();
     tile_sums
@@ -501,7 +440,7 @@ pub struct Spectrum {
 }
 
 /// From the input Field, calculate the input Spectrum
-pub fn hillenbrand_asm_part_1(
+pub fn sfm_asm_part_1(
     A_xi: Field,
     //z: f64,
     fl: f64,
@@ -541,7 +480,7 @@ pub fn hillenbrand_asm_part_1(
 }
 
 /// From the input Spectrum, calculate the Spectrum at distance z
-pub fn hillenbrand_asm_part_2(mut a_u_tile: Spectrum, z: f64, lambda: f64) -> Spectrum {
+pub fn sfm_asm_part_2(mut a_u_tile: Spectrum, z: f64, lambda: f64) -> Spectrum {
     centered_par_iter(&mut a_u_tile.values, a_u_tile.freq_res, |(y, x), e| {
         *e = *e
             * (Complex::new(
@@ -558,7 +497,7 @@ pub fn hillenbrand_asm_part_2(mut a_u_tile: Spectrum, z: f64, lambda: f64) -> Sp
 ///
 /// * `gamma` - Gamma is the zoom factor for each axis. Values greater than 1.0 decrease the sample pitch proportionally. Must not be less than 1.0.
 /// * `shift` - Shift values move the image on their respective axes. The values are interpreted as the value of the output pitch. This should be left at (0.0, 0.0) unless used for supersampling when it should typically be kept small (0 to 1.0). On a given axis, at a shift of 0.0, the image center will be at len/2, and at a shift of 1 will be at len/2-1.
-pub fn hillenbrand_asm_part_3(a_u_tile: &Spectrum, gamma: (f64, f64), shift: (f64, f64)) -> Field {
+pub fn sfm_asm_part_3(a_u_tile: &Spectrum, gamma: (f64, f64), shift: (f64, f64)) -> Field {
     let area_scaling = (gamma.0 * gamma.1).sqrt();
 
     let f_step = a_u_tile.freq_res;
@@ -626,226 +565,6 @@ fn scaling_czt(mut B_vw: Array2<Complex<f64>>, gamma: f64) -> Array2<Complex<f64
     });
 
     out
-}
-
-// to replace the fixed scale final ifft, a CZT is performed to allow scaling
-// input must not be padded, and must be centered and not fft_shifted
-#[allow(dead_code)]
-fn scaling_czt2(mut B_vw: Array2<Complex<f64>>, gamma: (f64, f64)) -> Array2<Complex<f64>> {
-    let M0 = B_vw.shape()[0];
-    let M1 = B_vw.shape()[1];
-
-    let a0 = gamma.0 * M0 as f64;
-    let a1 = gamma.1 * M1 as f64;
-
-    let mut planner = FftPlanner::new();
-    let fft0 = planner.plan_fft(M0 * 2, FftDirection::Forward);
-    let fft1 = planner.plan_fft(M1 * 2, FftDirection::Forward);
-    let ifft0 = planner.plan_fft(M0 * 2, FftDirection::Inverse);
-    let ifft1 = planner.plan_fft(M1 * 2, FftDirection::Inverse);
-
-    //fft normalisation factors
-    let axis0_factor = 2.0 / ((M0 * 2) as f64 * (M0 * 2) as f64 * (M0 * 2) as f64 * gamma.0).sqrt();
-    let axis1_factor = 1.0 / ((M1 * 2) as f64 * (M1 * 2) as f64 * (M1 * 2) as f64 * gamma.1).sqrt();
-
-    let scratch_len0 = max(
-        fft0.get_inplace_scratch_len(),
-        ifft0.get_inplace_scratch_len(),
-    );
-    let scratch_len1 = max(
-        fft1.get_inplace_scratch_len(),
-        ifft1.get_inplace_scratch_len(),
-    );
-
-    let mut D_vw_row: Vec<_> = (0..M1 * 2)
-        .map(|p1| {
-            let omega1 = p1 as f64 - (M1) as f64;
-            Complex::new(0.0, -PI * (omega1 * omega1 / a1)).exp()
-        })
-        .collect();
-    ifft_shift_inplace(aview_mut1(&mut D_vw_row));
-    fft1.process(&mut D_vw_row);
-    let d_uv_row = D_vw_row;
-
-    let axis1_start_phases: Vec<_> = (0..M1)
-        .map(|p1| {
-            let omega1 = p1 as f64 - (M1 / 2) as f64;
-            Complex::new(0.0, PI * (omega1 * omega1 / a1)).exp()
-        })
-        .collect();
-
-    let axis1_end_phases: Vec<_> = (0..M1)
-        .map(|m1| {
-            let x1 = m1 as f64 - (M1 / 2) as f64;
-            Complex::new(0.0, PI * (x1 * x1 / a1)).exp()
-        })
-        .collect();
-
-    // CZT along axis1, iteration over axis0
-    Zip::from(B_vw.axis_iter_mut(Axis(0)))
-        .into_par_iter()
-        .for_each_init(
-            || {
-                (
-                    vec![Zero::zero(); fft1.len()],
-                    vec![Zero::zero(); scratch_len1],
-                )
-            },
-            |(fft_buffer, scratch), B_vw_row| {
-                let mut B_vw_row = B_vw_row.0;
-                let fft_buffer = fft_buffer.as_mut_slice();
-                let pad = M1;
-                let half = M1 / 2;
-
-                // construct input equivalent to ifft_shift followed by padding to resample size
-                // the halves of the input are reverse compared to the hillenbrand tiling because the input has not yet been fft_shifted
-                // this is also why half rounds down, as in an ifft
-                unsafe {
-                    let mut k = 0;
-                    for (p1, &e) in B_vw_row.slice(s![half..]).iter().enumerate() {
-                        *fft_buffer.get_unchecked_mut(k) =
-                            e * axis1_start_phases.get_unchecked(p1 + half);
-                        k += 1;
-                    }
-                    for _ in 0..pad {
-                        *fft_buffer.get_unchecked_mut(k) = Zero::zero();
-                        k += 1;
-                    }
-                    for (p1, &e) in B_vw_row.slice(s![..half]).iter().enumerate() {
-                        *fft_buffer.get_unchecked_mut(k) = e * axis1_start_phases.get_unchecked(p1);
-                        k += 1;
-                    }
-                }
-
-                fft1.process_with_scratch(fft_buffer, scratch);
-
-                // multiply by d_uv_row
-                unsafe {
-                    for (k, e) in fft_buffer.iter_mut().enumerate() {
-                        *e *= d_uv_row.get_unchecked(k);
-                    }
-                }
-
-                ifft1.process_with_scratch(fft_buffer, scratch);
-
-                // fft_shift and depad then multiply by write back
-                unsafe {
-                    let mut k = 0;
-                    for (m1, e) in B_vw_row.slice_mut(s![half..]).iter_mut().enumerate() {
-                        *e = *fft_buffer.get_unchecked_mut(k)
-                            * axis1_end_phases.get_unchecked(m1 + half)
-                            * axis1_factor;
-                        k += 1;
-                    }
-                    k += pad;
-                    for (m1, e) in B_vw_row.slice_mut(s![..half]).iter_mut().enumerate() {
-                        *e = *fft_buffer.get_unchecked_mut(k)
-                            * axis1_end_phases.get_unchecked(m1)
-                            * axis1_factor;
-                        k += 1;
-                    }
-                }
-            },
-        );
-
-    //reuse if possible
-    let (d_uv_col, axis0_start_phases, axis0_end_phases) = if M0 == M1 {
-        (d_uv_row, axis1_start_phases, axis1_end_phases)
-    } else {
-        let mut D_vw_col: Vec<_> = (0..M0 * 2)
-            .map(|p0| {
-                let omega0 = p0 as f64 - (M0) as f64;
-                Complex::new(0.0, -PI * (omega0 * omega0 / a0)).exp()
-            })
-            .collect();
-        ifft_shift_inplace(aview_mut1(&mut D_vw_col));
-        fft0.process(&mut D_vw_col);
-
-        let axis0_start_phases: Vec<_> = (0..M0)
-            .map(|p0| {
-                let omega0 = p0 as f64 - (M0 / 2) as f64;
-                Complex::new(0.0, PI * (omega0 * omega0 / a0)).exp()
-            })
-            .collect();
-
-        let axis0_end_phases: Vec<_> = (0..M0)
-            .map(|m0| {
-                let x0 = m0 as f64 - (M0 / 2) as f64;
-                Complex::new(0.0, PI * (x0 * x0 / a0)).exp()
-            })
-            .collect();
-
-        (D_vw_col, axis0_start_phases, axis0_end_phases)
-    };
-
-    // CZT along axis0, iteration over axis1
-    Zip::from(B_vw.axis_iter_mut(Axis(1)))
-        .into_par_iter()
-        .for_each_init(
-            || {
-                (
-                    vec![Zero::zero(); fft0.len()],
-                    vec![Zero::zero(); scratch_len0],
-                )
-            },
-            |(fft_buffer, scratch), B_vw_col| {
-                let mut B_vw_col = B_vw_col.0;
-                let fft_buffer = fft_buffer.as_mut_slice();
-                let pad = B_vw_col.len();
-                let half = M0 / 2;
-
-                // construct input equivalent to fft_shift followed by padding to resample size
-                // the halves of the input are reverse compared to the hillenbrand tiling because the input has not yet been fft_shifted
-                // this is also why half rounds up, as in an ifft
-                unsafe {
-                    let mut k = 0;
-                    for (p0, &e) in B_vw_col.slice(s![half..]).iter().enumerate() {
-                        *fft_buffer.get_unchecked_mut(k) =
-                            e * axis0_start_phases.get_unchecked(p0 + half);
-                        k += 1;
-                    }
-                    for _ in 0..pad {
-                        *fft_buffer.get_unchecked_mut(k) = Zero::zero();
-                        k += 1;
-                    }
-                    for (p0, &e) in B_vw_col.slice(s![..half]).iter().enumerate() {
-                        *fft_buffer.get_unchecked_mut(k) = e * axis0_start_phases.get_unchecked(p0);
-                        k += 1;
-                    }
-                }
-
-                fft0.process_with_scratch(fft_buffer, scratch);
-
-                // multiply by d_uv_col
-                unsafe {
-                    for (k, e) in fft_buffer.iter_mut().enumerate() {
-                        *e *= d_uv_col.get_unchecked(k);
-                    }
-                }
-
-                ifft0.process_with_scratch(fft_buffer, scratch);
-
-                // fft_shift and depad then multiply and write back
-                unsafe {
-                    let mut k = 0;
-                    for (m0, e) in B_vw_col.slice_mut(s![half..]).iter_mut().enumerate() {
-                        *e = *fft_buffer.get_unchecked_mut(k)
-                            * axis0_end_phases.get_unchecked(m0 + half)
-                            * axis0_factor;
-                        k += 1;
-                    }
-                    k += pad;
-                    for (m0, e) in B_vw_col.slice_mut(s![..half]).iter_mut().enumerate() {
-                        *e = *fft_buffer.get_unchecked_mut(k)
-                            * axis0_end_phases.get_unchecked(m0)
-                            * axis0_factor;
-                        k += 1;
-                    }
-                }
-            },
-        );
-
-    B_vw
 }
 
 /// If gamma == 1.0 an ifft is performed. If gamma > 1.0 then a CZT is performed, with field intensity preserved.
@@ -1187,354 +906,4 @@ fn centered_par_iter<F: Fn((f64, f64), &mut Complex<f64>) + Sync>(
         let x = (x as f64 - (w / 2) as f64) * dw;
         f((y, x), e)
     });
-}
-
-#[cfg(test)]
-mod test {
-    use crate::mask::{
-        generate_bahtinov1_mask, generate_bahtinov2_mask, generate_bahtinov3_mask,
-        generate_bahtinov4_mask, generate_bahtinov5_mask, generate_bahtinov6_mask,
-        generate_bahtinov_mask, generate_mask,
-    };
-    use crate::{
-        hillenbrand_asm_part_1, hillenbrand_asm_part_2, hillenbrand_asm_part_3, resample_shape_min,
-    };
-    use image::{Rgb, RgbImage};
-    use ndarray::{s, Array2, ArrayView2};
-    use num_complex::Complex;
-    use palette::{Lch, LinSrgb, Srgb};
-
-    #[test]
-    pub fn test_aperture() {
-        let OD = 0.0254 * 6.0;
-
-        let mask_shape = 4096;
-        let n_vanes = 4;
-        let vane_width = 0.002;
-        let vane_offset = 0.1;
-        let r_outer = OD / 2.0;
-        let r_co = OD / 2.0 * 0.47;
-        let fl = OD * 8.0;
-
-        let input_field =
-            generate_mask(mask_shape, n_vanes, vane_width, vane_offset, r_outer, r_co);
-        let input_intensity = input_field.values.map(|e| e.norm_sqr());
-        save_real_image("test_input.png", input_intensity.view(), 1.0, true).unwrap();
-
-        let lambda = 600e-9;
-        let z = fl;
-
-        let oversample = 1.1;
-
-        let (resample_shape, _factor) = resample_shape_min(
-            input_field.values.shape(),
-            input_field.pitch,
-            lambda,
-            fl,
-            oversample,
-        );
-        //let default_output_pitch = pitch/factor[0];
-
-        let gamma = (4.0, 4.0); //(default_output_pitch / target_res).max(1.0);
-        let tile_shape = [
-            (mask_shape as f64 * oversample).ceil() as usize,
-            (mask_shape as f64 * oversample).ceil() as usize,
-        ];
-
-        let mut input_spectrum = hillenbrand_asm_part_1(
-            input_field,
-            fl,
-            &[lambda, lambda * 1.1],
-            tile_shape,
-            resample_shape,
-            false,
-        );
-        let output_spectrum = hillenbrand_asm_part_2(input_spectrum.swap_remove(0), z, lambda);
-        save_complex_image("test_spectrum.png", output_spectrum.values.view()).unwrap();
-
-        let super_sample = 1;
-        let mut super_sample_output =
-            Array2::zeros([tile_shape[0] * super_sample, tile_shape[1] * super_sample]);
-
-        for x in 0..super_sample {
-            for y in 0..super_sample {
-                let output = hillenbrand_asm_part_3(
-                    &output_spectrum,
-                    gamma,
-                    (
-                        y as f64 / super_sample as f64,
-                        x as f64 / super_sample as f64,
-                    ),
-                );
-                super_sample_output
-                    .slice_mut(s![y..;super_sample, x..;super_sample])
-                    .assign(&output.values);
-            }
-        }
-
-        let output_intensity = super_sample_output.map(|e| e.norm_sqr());
-        let output_log_intensity = log_intensity(output_intensity.view(), 1e-10);
-
-        save_real_image("test_output.png", output_log_intensity.view(), 1.0, true).unwrap();
-        save_complex_image("test_outputc.png", super_sample_output.view()).unwrap();
-    }
-
-    #[test]
-    fn test_bahtinov_mask() {
-        let OD = 0.0254 * 8.0;
-
-        let mask_shape = 4096;
-        let r_outer = OD / 2.0;
-        let r_co = OD / 2.0 * 0.33;
-
-        let input_field = generate_bahtinov_mask(
-            mask_shape,
-            0.005,
-            0.005,
-            0.11111 * ::std::f64::consts::PI,
-            r_outer,
-            r_co,
-        );
-        let input_intensity = input_field.values.map(|e| e.norm_sqr());
-        save_grayscale_real_image("bahtinov0.png", input_intensity.view(), 1.0, true).unwrap();
-    }
-
-    #[test]
-    fn test_bahtinov1_mask() {
-        let OD = 0.0254 * 8.0;
-
-        let mask_shape = 4096;
-        let r_outer = OD / 2.0;
-        let r_co = OD / 2.0 * 0.33;
-
-        let input_field = generate_bahtinov1_mask(
-            mask_shape,
-            0.005,
-            0.005,
-            0.11111 * ::std::f64::consts::PI,
-            r_outer,
-            r_co,
-        );
-        let input_intensity = input_field.values.map(|e| e.norm_sqr());
-        save_grayscale_real_image("bahtinov1.png", input_intensity.view(), 1.0, true).unwrap();
-    }
-
-    #[test]
-    fn test_bahtinov2_mask() {
-        let OD = 0.0254 * 8.0;
-
-        let mask_shape = 4096;
-        let r_outer = OD / 2.0;
-        let r_co = OD / 2.0 * 0.33;
-
-        let input_field = generate_bahtinov2_mask(
-            mask_shape,
-            0.005,
-            0.005,
-            0.11111 * ::std::f64::consts::PI,
-            r_outer,
-            r_co,
-        );
-        let input_intensity = input_field.values.map(|e| e.norm_sqr());
-        save_grayscale_real_image("bahtinov2.png", input_intensity.view(), 1.0, true).unwrap();
-    }
-
-    #[test]
-    fn test_bahtinov3_mask() {
-        let OD = 0.0254 * 8.0;
-
-        let mask_shape = 4096;
-        let r_outer = OD / 2.0;
-        let r_co = OD / 2.0 * 0.33;
-
-        let input_field = generate_bahtinov3_mask(
-            mask_shape,
-            0.005,
-            0.005,
-            0.11111 * ::std::f64::consts::PI,
-            r_outer,
-            r_co,
-        );
-        let input_intensity = input_field.values.map(|e| e.norm_sqr());
-        save_grayscale_real_image("bahtinov3.png", input_intensity.view(), 1.0, true).unwrap();
-    }
-
-    #[test]
-    fn test_bahtinov4_mask() {
-        let OD = 0.0254 * 8.0;
-
-        let mask_shape = 4096;
-        let r_outer = OD / 2.0;
-        let r_co = OD / 2.0 * 0.33;
-
-        let input_field = generate_bahtinov4_mask(
-            mask_shape,
-            0.005,
-            0.005,
-            0.11111 * ::std::f64::consts::PI,
-            r_outer,
-            r_co,
-        );
-        let input_intensity = input_field.values.map(|e| e.norm_sqr());
-        save_grayscale_real_image("bahtinov4.png", input_intensity.view(), 1.0, true).unwrap();
-    }
-
-    #[test]
-    fn test_bahtinov5_mask() {
-        let OD = 0.0254 * 8.0;
-
-        let mask_shape = 4096;
-        let r_outer = OD / 2.0;
-        let r_co = OD / 2.0 * 0.33;
-
-        let input_field = generate_bahtinov5_mask(
-            mask_shape,
-            0.005,
-            0.005,
-            0.11111 * ::std::f64::consts::PI,
-            r_outer,
-            r_co,
-        );
-        let input_intensity = input_field.values.map(|e| e.norm_sqr());
-        save_grayscale_real_image("bahtinov5.png", input_intensity.view(), 1.0, true).unwrap();
-    }
-
-    #[test]
-    fn test_bahtinov6_mask() {
-        let OD = 0.0254 * 8.0;
-
-        let mask_shape = 4096;
-        let r_outer = OD / 2.0;
-        let r_co = OD / 2.0 * 0.33;
-
-        let input_field = generate_bahtinov6_mask(
-            mask_shape,
-            0.005,
-            0.005,
-            0.11111 * ::std::f64::consts::PI,
-            r_outer,
-            r_co,
-        );
-        let input_intensity = input_field.values.map(|e| e.norm_sqr());
-        save_grayscale_real_image("bahtinov6.png", input_intensity.view(), 1.0, true).unwrap();
-    }
-
-    pub fn log_intensity(arr: ArrayView2<f64>, min: f64) -> Array2<f64> {
-        let log_min = -min.ln();
-        let max = arr.iter().fold(0.0, |max, e| e.max(max));
-        arr.map(|e| ((e / max).ln() / log_min + 1.0).max(0.0).min(1.0))
-    }
-
-    pub fn save_complex_image<T: AsRef<std::path::Path> + std::fmt::Debug>(
-        file_name: T,
-        arr: ArrayView2<Complex<f64>>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        if let &[h, w, ..] = arr.shape() {
-            let max_sqr: f64 = arr.iter().fold(0.0, |max, val| val.norm_sqr().max(max));
-            let sum_sqr: f64 = arr.iter().fold(0.0, |sum, val| val.norm_sqr() + sum);
-            println!(
-                "h:{} w:{} max_sqr:{} sum_sqr:{} - {:?}",
-                h, w, max_sqr, sum_sqr, file_name
-            );
-
-            let max = max_sqr.sqrt();
-
-            let mut img = RgbImage::new(w as u32, h as u32);
-
-            for (x, y, p) in img.enumerate_pixels_mut() {
-                let (r, theta) = arr[[y as usize, x as usize]].to_polar();
-                let r = r / max;
-
-                //let colour = Srgb::from(Hsv::new(360.0*(theta/std::fxx::consts::TAU + 0.5), 1.0, r*0.9));
-                let colour = Srgb::from(Lch::new(
-                    r * 100.0,
-                    r * 128.0,
-                    360.0 * (theta / ::std::f64::consts::PI + 1.0) * 0.5,
-                ));
-                *p = Rgb([
-                    (colour.red * 255.0) as u8,
-                    (colour.green * 255.0) as u8,
-                    (colour.blue * 255.0) as u8,
-                ]);
-            }
-
-            img.save(file_name).unwrap();
-        }
-        Ok(())
-    }
-
-    pub fn save_grayscale_real_image<T: AsRef<std::path::Path> + std::fmt::Debug>(
-        file_name: T,
-        arr: ArrayView2<f64>,
-        amp: f64,
-        normalise: bool,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        if let &[h, w, ..] = arr.shape() {
-            let mut max: f64 = arr.iter().fold(0.0, |max, val| val.max(max));
-            let sum = arr.iter().fold(0.0, |sum, val| val + sum);
-            println!("h:{} w:{} max:{} sum:{} - {:?}", h, w, max, sum, file_name);
-
-            let mut img = RgbImage::new(w as u32, h as u32);
-            if !normalise {
-                max = 1.0;
-            }
-
-            for (x, y, p) in img.enumerate_pixels_mut() {
-                let value = arr[[y as usize, x as usize]] / max;
-                let value = (value * amp).min(1.0).max(0.0);
-
-                let para = (value - value * value) * 0.1;
-
-                //let colour = Srgb::from(Hsl::new(360.0*(-value*0.65+0.65), 1.0, 0.01 + 0.99*value));
-                let colour = Srgb::from_linear(LinSrgb::new(
-                    value + para * ((value + 2.0 / 3.0) * std::f64::consts::PI * 2.0).sin(),
-                    value + para * ((value + 1.0 / 3.0) * std::f64::consts::PI * 2.0).sin(),
-                    value + para * (value * std::f64::consts::PI * 2.0).sin(),
-                ));
-                *p = Rgb([
-                    (colour.red * 255.0) as u8,
-                    (colour.green * 255.0) as u8,
-                    (colour.blue * 255.0) as u8,
-                ]);
-            }
-
-            img.save(file_name).unwrap();
-        }
-        Ok(())
-    }
-
-    pub fn save_real_image<T: AsRef<std::path::Path> + std::fmt::Debug>(
-        file_name: T,
-        arr: ArrayView2<f64>,
-        amp: f64,
-        normalise: bool,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        if let &[h, w, ..] = arr.shape() {
-            let mut max: f64 = arr.iter().fold(0.0, |max, val| val.max(max));
-            let sum = arr.iter().fold(0.0, |sum, val| val + sum);
-            println!("h:{} w:{} max:{} sum:{} - {:?}", h, w, max, sum, file_name);
-
-            let mut img = RgbImage::new(w as u32, h as u32);
-            if !normalise {
-                max = 1.0;
-            }
-
-            for (x, y, p) in img.enumerate_pixels_mut() {
-                let value = arr[[y as usize, x as usize]] / max;
-                let value = (value * amp).min(1.0);
-
-                //let colour = Srgb::from(Hsl::new(360.0*(-value*0.65+0.65), 1.0, 0.01 + 0.99*value));
-                let colour =
-                    Srgb::from(Lch::new(value * 70.0, value * 128.0, 280.0 - 245.0 * value));
-                *p = Rgb([
-                    (colour.red * 255.0) as u8,
-                    (colour.green * 255.0) as u8,
-                    (colour.blue * 255.0) as u8,
-                ]);
-            }
-
-            img.save(file_name).unwrap();
-        }
-        Ok(())
-    }
 }

@@ -1,5 +1,5 @@
 [package]
-name = "hillenbrand"
+name = "summed_field_method"
 version = "0.1.0"
 authors = ["James Millard <millard.jn@gmail.com>"]
 edition = "2018"
