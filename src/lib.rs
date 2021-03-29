@@ -465,7 +465,7 @@ pub fn sfm_asm_part_1(
     A_xi_tiles
         .into_iter()
         .map(|mut A_xi_tile| {
-            Zip::from(&mut A_xi_tile.values).par_apply(|e| *e *= area_scaling);
+            Zip::from(&mut A_xi_tile.values).par_for_each(|e| *e *= area_scaling);
 
             // a(u)
             let f_res = freq_res(A_xi_tile.values.shape(), A_xi_tile.pitch);
@@ -901,7 +901,7 @@ fn centered_par_iter<F: Fn((f64, f64), &mut Complex<f64>) + Sync>(
 ) {
     let h = array.shape()[0];
     let w = array.shape()[1];
-    Zip::indexed(array).par_apply(|(y, x), e| {
+    Zip::indexed(array).par_for_each(|(y, x), e| {
         let y = (y as f64 - (h / 2) as f64) * dh;
         let x = (x as f64 - (w / 2) as f64) * dw;
         f((y, x), e)

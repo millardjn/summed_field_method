@@ -18,7 +18,7 @@ pub fn _fft2(mut input: ArrayViewMut2<Complex<f64>>, direction: FftDirection) {
     let fft_col = planner.plan_fft(input.shape()[0], direction);
     let normalisation = 1.0 / ((input.shape()[0] * input.shape()[1]) as f64).sqrt();
 
-    Zip::from(input.genrows_mut())
+    Zip::from(input.rows_mut())
         .into_par_iter()
         .for_each_init(
             || vec![Zero::zero(); fft_row.get_inplace_scratch_len()],
@@ -27,7 +27,7 @@ pub fn _fft2(mut input: ArrayViewMut2<Complex<f64>>, direction: FftDirection) {
             },
         );
 
-    Zip::from(input.gencolumns_mut())
+    Zip::from(input.columns_mut())
         .into_par_iter()
         .for_each_init(
             || {
@@ -135,11 +135,11 @@ pub fn _fft2c(mut input: ArrayViewMut2<Complex<f64>>, direction: FftDirection) {
 ///
 /// For even array lengths, which have no center value, this moves the value to the next value after the center
 pub fn fft2_shift_inplace(mut input: ArrayViewMut2<Complex<f64>>) {
-    Zip::from(input.lanes_mut(Axis(1))).par_apply(|row| {
+    Zip::from(input.lanes_mut(Axis(1))).par_for_each(|row| {
         fft_shift_inplace(row);
     });
 
-    Zip::from(input.lanes_mut(Axis(0))).par_apply(|col| {
+    Zip::from(input.lanes_mut(Axis(0))).par_for_each(|col| {
         fft_shift_inplace(col);
     });
 }
@@ -148,11 +148,11 @@ pub fn fft2_shift_inplace(mut input: ArrayViewMut2<Complex<f64>>) {
 ///
 /// Inverts fft_shift exactly, accounting for the asymmetry of even arrays
 pub fn ifft2_shift_inplace(mut input: ArrayViewMut2<Complex<f64>>) {
-    Zip::from(input.lanes_mut(Axis(1))).par_apply(|row| {
+    Zip::from(input.lanes_mut(Axis(1))).par_for_each(|row| {
         ifft_shift_inplace(row);
     });
 
-    Zip::from(input.lanes_mut(Axis(0))).par_apply(|col| {
+    Zip::from(input.lanes_mut(Axis(0))).par_for_each(|col| {
         ifft_shift_inplace(col);
     });
 }

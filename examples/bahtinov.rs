@@ -201,7 +201,7 @@ pub fn generate_bahtinov_mask(
 
     let mut mask = Array2::zeros([shape, shape]);
 
-    Zip::indexed(&mut mask).par_apply(|(y, x), e| {
+    Zip::indexed(&mut mask).par_for_each(|(y, x), e| {
         let mut value = 1.0;
 
         let y0 = (y as f64 - c) * pitch;
@@ -267,7 +267,7 @@ pub fn generate_bahtinov1_mask(
 
     let mut mask = Array2::zeros([shape, shape]);
 
-    Zip::indexed(&mut mask).par_apply(|(y, x), e| {
+    Zip::indexed(&mut mask).par_for_each(|(y, x), e| {
         let mut value = 1.0;
 
         let y0 = (y as f64 - c) * pitch;
@@ -349,7 +349,7 @@ pub fn generate_lin_chirp_bahtinov_mask(
 
     let mut mask = Array2::zeros([shape, shape]);
 
-    Zip::indexed(&mut mask).par_apply(|(y, x), e| {
+    Zip::indexed(&mut mask).par_for_each(|(y, x), e| {
         let mut value = 1.0;
 
         let y0 = (y as f64 - c) * pitch;
@@ -438,7 +438,7 @@ pub fn generate_exp_chirp_bahtinov_mask(
 
     let mut mask = Array2::zeros([shape, shape]);
 
-    Zip::indexed(&mut mask).par_apply(|(y, x), e| {
+    Zip::indexed(&mut mask).par_for_each(|(y, x), e| {
         let mut value = 1.0;
 
         let y0 = (y as f64 - c) * pitch;
