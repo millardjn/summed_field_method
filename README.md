@@ -9,7 +9,7 @@ Feel free to open an issue for general discussion or to raise any problems.
 
 
 ## Example Outputs
-The examples below display multispectral outputs rendered under photopic vision assumptions, with a 6500K illuminant, using the ![palette](https://crates.io/crates/palette) crate and CIE CMFs.
+The examples below display multispectral outputs rendered under photopic vision assumptions, with a 6500K illuminant, using the [palette](https://crates.io/crates/palette) crate and CIE CMFs.
 
 **Airy Disk**
 ![AiryDisk](res/airy_disk.png)
