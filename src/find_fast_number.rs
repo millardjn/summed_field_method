@@ -12,18 +12,15 @@ fn fast_fft_len(
     }
     let mut min = product;
     loop {
-        if product > lower_limit {
-            if product % multi_factor2 != 0 {
-                return min;
+        match product.cmp(&lower_limit) {
+            std::cmp::Ordering::Less => product *= multi_factor1,
+            std::cmp::Ordering::Equal => min = product,
+            std::cmp::Ordering::Greater => {
+                if product % multi_factor2 != 0 {
+                    return min;
+                }
+                product /= multi_factor2;
             }
-            product /= multi_factor2;
-        } else if product < lower_limit {
-            product *= multi_factor1;
-        } else {
-            return product;
-        }
-        if product > lower_limit && product < min {
-            min = product;
         }
     }
 }

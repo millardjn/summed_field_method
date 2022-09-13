@@ -2,7 +2,7 @@ use image::{Rgb, RgbImage};
 use ndarray::{s, ArrayView2};
 use ndarray::{Array2, Zip};
 use num_complex::Complex;
-use palette::{Lch, LinSrgb, Srgb};
+use palette::{FromColor, Lch, LinSrgb, Srgb};
 use summed_field_method::Field;
 use summed_field_method::{resample_shape_min, sfm_asm_part_1, sfm_asm_part_2, sfm_asm_part_3};
 
@@ -143,7 +143,8 @@ pub fn save_real_image<T: AsRef<std::path::Path> + std::fmt::Debug>(
             let value = (value * amp).min(1.0);
 
             //let colour = Srgb::from(Hsl::new(360.0*(-value*0.65+0.65), 1.0, 0.01 + 0.99*value));
-            let colour = Srgb::from(Lch::new(value * 70.0, value * 128.0, 280.0 - 245.0 * value));
+            let colour =
+                Srgb::from_color(Lch::new(value * 70.0, value * 128.0, 280.0 - 245.0 * value));
             *p = Rgb([
                 (colour.red * 255.0) as u8,
                 (colour.green * 255.0) as u8,
@@ -241,7 +242,7 @@ pub fn save_complex_image<T: AsRef<std::path::Path> + std::fmt::Debug>(
             let r = r / max;
 
             //let colour = Srgb::from(Hsv::new(360.0*(theta/std::fxx::consts::TAU + 0.5), 1.0, r*0.9));
-            let colour = Srgb::from(Lch::new(
+            let colour = Srgb::from_color(Lch::new(
                 r * 100.0,
                 r * 128.0,
                 360.0 * (theta / ::std::f64::consts::PI + 1.0) * 0.5,

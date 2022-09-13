@@ -1,8 +1,8 @@
 [package]
 name = "summed_field_method"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["James Millard <millard.jn@gmail.com>"]
-edition = "2018"
+edition = "2021"
 license = "MIT"
 repository = "https://github.com/millardjn/summed_field_method"
 documentation = "https://docs.rs/summed_field_method"
@@ -10,12 +10,12 @@ documentation = "https://docs.rs/summed_field_method"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-num-complex = "0.3"
+num-complex = "0.4"
 ndarray =  { version = "0.15", features = ["rayon"]}
-rustfft = "5"
+rustfft = "6"
 num-integer = "0.1"
 unchecked-index = "0.2"
 
 [dev-dependencies]
-palette = "0.5.0"
-image = "0.23"
+palette = "0.6.0"
+image = "0.24"

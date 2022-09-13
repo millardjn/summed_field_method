@@ -144,9 +144,10 @@ fn sum_to_tile(array: ArrayView2<Complex<f64>>, tile_shape: [usize; 2]) -> Array
         let row_slice = row.as_slice().unwrap();
         let out_row_slice = out_row.as_slice_mut().unwrap();
 
-        for j in 0..array.shape()[1] {
+        debug_assert_eq!(row_slice.len(), array.shape()[1]);
+        for (j, rs) in row_slice.iter().enumerate() {
             let out_j = (tile_shift1 * tile_shape[1] + j - offset1) % tile_shape[1];
-            out_row_slice[out_j] += row_slice[j];
+            out_row_slice[out_j] += rs;
         }
     }
 
@@ -183,7 +184,7 @@ fn input_tile_high_memory(
                 //let theta = -2.0 * PI / lambda * ((y * y + x * x + fl * fl).sqrt() - fl); // numerically unstable - cancellation
                 let theta = -2.0 * PI / lambda
                     * ((y * y + x * x) / ((y * y + x * x + fl * fl).sqrt() + fl)); // stable
-                *e = *e * Complex::new(0.0, theta).exp()
+                *e *= Complex::new(0.0, theta).exp()
             });
 
             // sum to tile
@@ -482,12 +483,11 @@ pub fn sfm_asm_part_1(
 /// From the input Spectrum, calculate the Spectrum at distance z
 pub fn sfm_asm_part_2(mut a_u_tile: Spectrum, z: f64, lambda: f64) -> Spectrum {
     centered_par_iter(&mut a_u_tile.values, a_u_tile.freq_res, |(y, x), e| {
-        *e = *e
-            * (Complex::new(
-                0.0,
-                2.0 * PI * z * (1.0 / (lambda * lambda) - (y * y + x * x)).sqrt(),
-            ))
-            .exp()
+        *e *= (Complex::new(
+            0.0,
+            2.0 * PI * z * (1.0 / (lambda * lambda) - (y * y + x * x)).sqrt(),
+        ))
+        .exp()
     });
 
     a_u_tile
@@ -537,7 +537,7 @@ fn scaling_czt(mut B_vw: Array2<Complex<f64>>, gamma: f64) -> Array2<Complex<f64
     B_vw.indexed_iter_mut().for_each(|((p0, p1), e)| {
         let omega0 = p0 as f64 - (M0 / 2) as f64;
         let omega1 = p1 as f64 - (M1 / 2) as f64;
-        *e = *e * Complex::new(0.0, PI * (omega0 * omega0 / a0 + omega1 * omega1 / a1)).exp();
+        *e *= Complex::new(0.0, PI * (omega0 * omega0 / a0 + omega1 * omega1 / a1)).exp();
     });
 
     let mut B_vw = pad_zero_2D(B_vw.view());

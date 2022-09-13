@@ -18,14 +18,12 @@ pub fn _fft2(mut input: ArrayViewMut2<Complex<f64>>, direction: FftDirection) {
     let fft_col = planner.plan_fft(input.shape()[0], direction);
     let normalisation = 1.0 / ((input.shape()[0] * input.shape()[1]) as f64).sqrt();
 
-    Zip::from(input.rows_mut())
-        .into_par_iter()
-        .for_each_init(
-            || vec![Zero::zero(); fft_row.get_inplace_scratch_len()],
-            |scratch, mut row| {
-                fft_row.process_with_scratch(&mut row.0.as_slice_mut().unwrap(), scratch);
-            },
-        );
+    Zip::from(input.rows_mut()).into_par_iter().for_each_init(
+        || vec![Zero::zero(); fft_row.get_inplace_scratch_len()],
+        |scratch, mut row| {
+            fft_row.process_with_scratch(row.0.as_slice_mut().unwrap(), scratch);
+        },
+    );
 
     Zip::from(input.columns_mut())
         .into_par_iter()
@@ -174,13 +172,9 @@ pub fn fft_shift_inplace(mut input: ArrayViewMut1<Complex<f64>>) {
     for _ in 0..half {
         i -= 1;
         j -= 1;
-        let temp2 = temp1;
-        temp1 = input[i];
-        input[i] = temp2;
+        std::mem::swap(&mut temp1, &mut input[i]);
 
-        let temp2 = temp1;
-        temp1 = input[j];
-        input[j] = temp2;
+        std::mem::swap(&mut temp1, &mut input[j]);
     }
     input[half] = temp1;
 }
@@ -196,19 +190,14 @@ pub fn ifft_shift_inplace(mut input: ArrayViewMut1<Complex<f64>>) {
     let len = input.len();
     let half = len / 2;
 
-    let mut i = 0;
     let mut j = half + 1;
     let mut temp1 = input[half];
-    for _ in 0..half {
-        let temp2 = temp1;
-        temp1 = input[i];
-        input[i] = temp2;
+    for i in 0..half {
+        std::mem::swap(&mut temp1, &mut input[i]);
 
-        let temp2 = temp1;
-        temp1 = input[j];
-        input[j] = temp2;
+        std::mem::swap(&mut temp1, &mut input[j]);
 
-        i += 1;
+        //i += 1;
         j += 1;
     }
     input[half] = temp1;
@@ -394,8 +383,8 @@ mod tests {
 
         let expected = [
             Complex::new(15.0, 0.),
-            Complex::new(-1.5, 0.86602540333333333333333333333333),
-            Complex::new(-1.5, -0.86602540333333333333333333333333),
+            Complex::new(-1.5, 0.866_025_403_333_333_3),
+            Complex::new(-1.5, -0.866_025_403_333_333_3),
             Complex::new(-4.5, 2.59807621),
             Complex::new(0.0, 0.),
             Complex::new(0.0, 0.),
@@ -403,7 +392,7 @@ mod tests {
             Complex::new(0.0, 0.),
             Complex::new(0.0, 0.),
         ];
-        assert_eq_vecs(&expected, &output.as_slice().unwrap());
+        assert_eq_vecs(&expected, output.as_slice().unwrap());
     }
 
     #[test]
@@ -422,6 +411,6 @@ mod tests {
             .into_iter()
             .map(|x| Complex::new(x, 0.))
             .collect();
-        assert_eq_vecs(&expected, &output2.as_slice().unwrap());
+        assert_eq_vecs(&expected, output2.as_slice().unwrap());
     }
 }
