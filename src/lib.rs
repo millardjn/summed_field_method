@@ -206,8 +206,11 @@ fn input_tile_low_memory(
     resample_shape: [usize; 2],
     extra_low_memory: bool,
 ) -> Vec<Field> {
-    assert!(resample_shape[0] > A_xi.values.shape()[0]);
-    assert!(resample_shape[1] > A_xi.values.shape()[1]);
+    assert!(resample_shape[0] >= A_xi.values.shape()[0]);
+    assert!(resample_shape[1] >= A_xi.values.shape()[1]);
+
+    assert!(resample_shape[0] >= tile_shape[0]);
+    assert!(resample_shape[1] >= tile_shape[1]);
 
     let offset0 = resample_shape[0] / 2 - tile_shape[0] / 2;
     let offset1 = resample_shape[1] / 2 - tile_shape[1] / 2;
