@@ -49,16 +49,19 @@ pub fn _fft2(mut input: ArrayViewMut2<Complex<f64>>, direction: FftDirection) {
         );
 }
 
+/// performs a 2D fft where the 0th component is at the center rather than the normal right
+/// removes the need for ifft_shift before and fft_shift after.
 pub fn fft2c(mut input: Array2<Complex<f64>>) -> Array2<Complex<f64>> {
     _fft2c(input.view_mut(), FftDirection::Forward);
     input
 }
+/// performs a 2D ifft where the 0th component is at the center rather than the normal right
+/// removes the need for ifft_shift before and fft_shift after.
 pub fn ifft2c(mut input: Array2<Complex<f64>>) -> Array2<Complex<f64>> {
     _fft2c(input.view_mut(), FftDirection::Inverse);
     input
 }
-/// performs a 2D fft where the 0th component is at the center rather than the normal right
-/// removes the neext for ifft_shift befor and fft_shift after.
+
 pub fn _fft2c(mut input: ArrayViewMut2<Complex<f64>>, direction: FftDirection) {
     let i0 = input.shape()[0];
     let i1 = input.shape()[1];

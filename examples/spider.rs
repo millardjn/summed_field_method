@@ -105,7 +105,7 @@ pub fn save_grayscale_real_image<T: AsRef<std::path::Path> + std::fmt::Debug>(
             let para = (value - value * value) * 0.1;
 
             //let colour = Srgb::from(Hsl::new(360.0*(-value*0.65+0.65), 1.0, 0.01 + 0.99*value));
-            let colour = Srgb::from_linear(LinSrgb::new(
+            let colour = Srgb::<f64>::from_linear(LinSrgb::new(
                 value + para * ((value + 2.0 / 3.0) * std::f64::consts::PI * 2.0).sin(),
                 value + para * ((value + 1.0 / 3.0) * std::f64::consts::PI * 2.0).sin(),
                 value + para * (value * std::f64::consts::PI * 2.0).sin(),

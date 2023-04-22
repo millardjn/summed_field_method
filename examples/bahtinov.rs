@@ -3,6 +3,7 @@ use ndarray::ArrayView2;
 use ndarray::{Array2, Zip};
 use num_complex::Complex;
 use palette::{FromColor, Lch, LinSrgb, Srgb};
+use summed_field_method::fresnel::fresnel;
 use std::cmp::min;
 use summed_field_method::Field;
 
@@ -103,7 +104,7 @@ pub fn save_grayscale_real_image<T: AsRef<std::path::Path> + std::fmt::Debug>(
             let para = (value - value * value) * 0.1;
 
             //let colour = Srgb::from(Hsl::new(360.0*(-value*0.65+0.65), 1.0, 0.01 + 0.99*value));
-            let colour = Srgb::from_linear(LinSrgb::new(
+            let colour = Srgb::<f64>::from_linear(LinSrgb::new(
                 value + para * ((value + 2.0 / 3.0) * std::f64::consts::PI * 2.0).sin(),
                 value + para * ((value + 1.0 / 3.0) * std::f64::consts::PI * 2.0).sin(),
                 value + para * (value * std::f64::consts::PI * 2.0).sin(),
@@ -163,6 +164,40 @@ fn soft_greater_than(x: f64, x_nominal: f64, pitch: f64) -> f64 {
         1.0
     } else {
         (x - (x_nominal - 0.5 * pitch)) / pitch
+    }
+}
+
+
+/// Standard circle Mask
+pub fn generate_circle_mask(
+    shape: usize,
+    padding_factor: f64,
+    r_outer: f64,
+    r_co: f64,
+) -> Field {
+    let pitch = padding_factor * r_outer / (div_up(shape, 2) - 2) as f64;
+    let c = (shape / 2) as f64;
+
+    let mut mask = Array2::zeros([shape, shape]);
+
+    Zip::indexed(&mut mask).par_for_each(|(y, x), e| {
+        let mut value = 1.0;
+
+        let y0 = (y as f64 - c) * pitch;
+        let x0 = (x as f64 - c) * pitch;
+
+
+        let r = (x0 * x0 + y0 * y0).sqrt();
+
+        value *= soft_greater_than(r, r_co, pitch);
+        value *= 1.0 - soft_greater_than(r, r_outer, pitch);
+
+        *e = Complex::new(value, 0.0);
+    });
+
+    Field {
+        values: mask,
+        pitch: (pitch, pitch),
     }
 }
 
@@ -1416,3 +1451,28 @@ fn field_sum(field: &Field) -> f64 {
 //         save_grayscale_real_image("bahtinov6.png", input_intensity.view(), 1.0, true).unwrap();
 //     }
 // }
+
+
+#[test]
+fn test_fresnel(){
+
+    let od = 0.0254 * 8.0;
+
+    let mask_shape = 4096;
+    let r_outer = od / 2.0;
+    let r_co = od / 2.0 * 0.33;
+    let fl = 1.0;
+
+    let input_field = generate_circle_mask(mask_shape, 1.0, r_outer, r_co);
+
+
+    println!("field_sum: {}", field_sum(&input_field));
+    let input_intensity = input_field.values.map(|e| e.norm_sqr());
+    save_grayscale_real_image("circle.png", input_intensity.view(), 1.0, true).unwrap();
+
+
+    let focal_field = fresnel(input_field, 1.0, 1.0, 700e-9, (2.0, 2.0));
+
+
+    save_complex_image("fresnel.png", focal_field.values.view()).unwrap();
+}

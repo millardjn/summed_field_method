@@ -17,6 +17,7 @@ use unchecked_index::get_unchecked_mut;
 mod fft2;
 mod find_fast_number;
 pub mod mask;
+pub mod fresnel;
 
 /// Returns the minimum resample size that meets ASM sampling critera as well as the resampling factor for each axis.
 /// Resample shape is never smaller than the input array shape
@@ -197,6 +198,117 @@ fn input_tile_high_memory(
         })
         .collect()
 }
+
+// fn input_tile_low_memory_no_resample(
+//     mut A_xi: Field,
+//     fl: f64,
+//     wavelengths: &[f64],
+//     tile_shape: [usize; 2],
+// ) -> Vec<Field> {
+
+//     let offset0 = A_xi.values.shape()[0] / 2 - tile_shape[0] / 2;
+//     let offset1 = A_xi.values.shape()[1] / 2 - tile_shape[1] / 2;
+
+//     let border_tiles0 = div_up(offset0, tile_shape[0]);
+//     let border_tiles1 = div_up(offset1, tile_shape[1]);
+
+
+
+//     let sp_step = A_xi.pitch;
+
+//     let mut tile_sums: Array3<Complex<f64>> =
+//         Array3::zeros([wavelengths.len(), tile_shape[0], tile_shape[1]]);
+
+//         // Once temp is filled, perform fft acros axis 1, and sum tile contributions
+//         let mut temp0_slice_start = 0;
+//         while temp0_slice_start < axis0_ifft_panel.shape()[0] {
+//             let tile0_slice_start = ((border_tiles0 * tile_shape[0] + temp0_slice_start + start0)
+//                 .checked_sub(offset0)
+//                 .unwrap())
+//                 % tile_shape[0];
+//             let temp0_slice_end = min(
+//                 axis0_ifft_panel.shape()[0],
+//                 (temp0_slice_start + tile_shape[0])
+//                     .checked_sub(tile0_slice_start)
+//                     .unwrap(),
+//             ); // end slice at either end of temp or end of
+//             let tile0_slice_end = (tile0_slice_start + temp0_slice_end)
+//                 .checked_sub(temp0_slice_start)
+//                 .unwrap();
+
+//             let mut tile_slices =
+//                 tile_sums.slice_mut(s![.., tile0_slice_start..tile0_slice_end, ..]);
+
+//             Zip::indexed(tile_slices.axis_iter_mut(Axis(1)))
+//                 .into_par_iter()
+//                 .for_each(
+//                     |(fft_input, scratch), (i, mut tiles, temp)| {
+
+
+//                         // write from ifft to tile - linear chunks (fast)
+//                         let half = (fft_out.len() + 1) / 2;
+//                         let mut j_start = 0;
+//                         let i = i + start0 + temp0_slice_start;
+//                         let y = (i as f64 - (resample_shape[0] / 2) as f64) * sp_step.0;
+//                         while j_start < resample_shape[1] {
+//                             let fft_j_start = (j_start + half) % fft_out.len(); //fftshift
+//                             let out_j_start =
+//                                 (border_tiles1 * tile_shape[1] + j_start - offset1) % tile_shape[1];
+
+//                             let len = min(
+//                                 if fft_j_start < half {
+//                                     half - fft_j_start
+//                                 } else {
+//                                     fft_out.len() - fft_j_start
+//                                 },
+//                                 tile_shape[1] - out_j_start,
+//                             );
+
+//                             for (i, mut tile) in tiles.axis_iter_mut(Axis(0)).enumerate() {
+//                                 let lambda = wavelengths[i];
+//                                 let tile_slice = tile.as_slice_mut().unwrap();
+
+//                                 debug_assert!(out_j_start + len <= tile_slice.len());
+//                                 debug_assert!(fft_j_start + len <= fft_out.len());
+
+//                                 for n in 0..len {
+//                                     let x = ((j_start + n) as f64 - (resample_shape[1] / 2) as f64)
+//                                         * sp_step.1;
+
+//                                     //let theta = -2.0 * PI / lambda * ((y * y + x * x + fl * fl).sqrt() - fl); // numerically unstable due to cancellation
+//                                     let theta = -2.0 * PI / lambda
+//                                         * ((y * y + x * x)
+//                                             / ((y * y + x * x + fl * fl).sqrt() + fl)); // stable
+//                                     let focal_phase = Complex::new(0.0, theta).exp();
+//                                     unsafe {
+//                                         *get_unchecked_mut(tile_slice, out_j_start + n) +=
+//                                             fft_out.get_unchecked(fft_j_start + n) * focal_phase;
+//                                     }
+//                                 }
+//                             }
+
+//                             j_start += len;
+//                         }
+//                     },
+//                 );
+
+//             temp0_slice_start = temp0_slice_end;
+//         }
+
+
+
+//     let fft_normalisation = 1.0 / (resample_shape[0] as f64 * resample_shape[1] as f64).sqrt();
+//     tile_sums
+//         .axis_iter_mut(Axis(0))
+//         .map(|mut tile_sum| {
+//             tile_sum.par_map_inplace(|e| *e *= fft_normalisation);
+//             Field {
+//                 values: tile_sum.to_owned(),
+//                 pitch: sp_step,
+//             }
+//         })
+//         .collect()
+// }
 
 fn input_tile_low_memory(
     mut A_xi: Field,
