@@ -1,6 +1,6 @@
 [package]
 name = "summed_field_method"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["James Millard <millard.jn@gmail.com>"]
 edition = "2021"
 license = "MIT"
@@ -11,7 +11,7 @@ documentation = "https://docs.rs/summed_field_method"
 
 [dependencies]
 num-complex = "0.4"
-ndarray =  { version = "0.15", features = ["rayon"]}
+ndarray =  { version = "0.16", features = ["rayon"]}
 rustfft = "6"
 num-integer = "0.1"
 unchecked-index = "0.2"
