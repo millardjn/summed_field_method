@@ -1,0 +1,13 @@
+[package]
+name = "bahtinov"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+image = "0.24"
+ndarray =  { version = "0.15", features = ["rayon"]}
+num-complex = "0.4"
+palette = "0.7.0"
+summed_field_method = { path = "../../" }
